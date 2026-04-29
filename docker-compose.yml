@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8000"
+    environment:
+      # Values are read from a `.env` file in this directory (Compose substitutes ${...}).
+      APP_PASSWORD: ${APP_PASSWORD:-changeme}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-insecure-change-me}
+      DATA_DIR: ${DATA_DIR:-/data}
+      DEFAULT_OUTPUT_PATH: ${DEFAULT_OUTPUT_PATH:-}
+    volumes:
+      - ./data:/data

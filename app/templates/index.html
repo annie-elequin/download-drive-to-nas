@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}New download · Drive to NAS{% endblock %}
+{% block content %}
+<h1>Download folder to ZIP</h1>
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+<form method="post" action="/jobs">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="drive_url">Google Drive folder URL</label>
+  <input type="url" id="drive_url" name="drive_url" required placeholder="https://drive.google.com/drive/folders/...">
+  <p class="hint">Folder must be shared so anyone with the link can view.</p>
+  <label for="destination_path">Destination folder (full path)</label>
+  <input type="text" id="destination_path" name="destination_path" required value="{{ default_destination }}" spellcheck="false" autocomplete="off">
+  <p class="hint">Must be inside <code>DATA_DIR</code>. In Docker, <code>DATA_DIR</code> is usually <code>/data</code> (your NAS folder is bind-mounted there). For local runs, set <code>DATA_DIR</code> to something like your Downloads path so files never leave that tree.</p>
+  <label for="archive_base">Zip file name (without .zip)</label>
+  <input type="text" id="archive_base" name="archive_base" placeholder="Optional — default is archive_…" pattern="[a-zA-Z0-9_.-]*" title="Letters, numbers, dot, underscore, hyphen">
+  <button type="submit">Start download</button>
+</form>
+<form method="post" action="/logout" class="row">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="button-link">Sign out</button>
+</form>
+{% endblock %}

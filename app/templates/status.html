@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id[:8] }} · Drive to NAS{% endblock %}
+{% block content %}
+<h1>Job status</h1>
+<p>
+  <span class="status-badge status-{{ job.status.value }}">{{ job.status.value }}</span>
+  {% if job.message %}<span> — {{ job.message }}</span>{% endif %}
+</p>
+{% if job.destination_path %}
+<p>Destination: <code>{{ job.destination_path }}</code></p>
+{% endif %}
+{% if job.zip_path %}
+<p>Output: <code>{{ job.zip_path }}</code></p>
+{% endif %}
+{% if job.status.value in ('pending', 'running') %}
+<p id="poll-hint">Refreshing…</p>
+<script>
+(function() {
+  const id = {{ job.id | tojson }};
+  function tick() {
+    fetch('/api/jobs/' + id, { credentials: 'same-origin' })
+      .then(r => { if (r.status === 401) { window.location = '/login'; return null; } return r.json(); })
+      .then(data => {
+        if (!data) return;
+        if (data.status === 'pending' || data.status === 'running') {
+          setTimeout(tick, 2000);
+        } else {
+          window.location.reload();
+        }
+      })
+      .catch(() => setTimeout(tick, 3000));
+  }
+  setTimeout(tick, 1500);
+})();
+</script>
+{% endif %}
+<h2>Log</h2>
+<pre class="log">{{ job.log or '(empty)' }}</pre>
+<div class="row">
+  <a href="/">New job</a>
+  <form method="post" action="/logout">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="button-link">Sign out</button>
+  </form>
+</div>
+{% endblock %}
