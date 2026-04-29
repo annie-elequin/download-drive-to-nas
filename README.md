@@ -22,6 +22,7 @@ Then edit `.env`. The app loads it automatically on startup ([python-dotenv](htt
 | Variable | Description |
 |----------|-------------|
 | `HOST_DATA_PATH` | **Host** directory bind-mounted to `/data` in the container. Example: `/volume1/Backups/drive-to-nas`. Default when unset: `./data` (repo folder). |
+| `HOST_PORT` | **Host** TCP port mapped to the app’s port 8000 inside the container. Default `8080`. Set to another value (e.g. `8081`) if something else already uses 8080 on the NAS. |
 | `APP_PASSWORD` | Single shared password for the web UI. Use a long random value (e.g. from a password manager). |
 | `SESSION_SECRET` | Secret used to sign session cookies. Generate a random string for production. |
 | `DATA_DIR` | Path **inside the container** for allowed output paths (default `/data`). You normally leave this as `/data` so it matches the mount. |
@@ -49,9 +50,20 @@ You do **not** need to change the in-container path **`/data`** unless you have 
 ## Portainer stack (quick steps)
 
 1. **Add stack** in Portainer and paste `docker-compose.yml`.
-2. Under **Environment variables**, paste values from `stack.env.example` (set **`HOST_DATA_PATH`** to your real share path, and strong secrets).
-3. **Deploy**. The app writes under `/data/...` in the container, which is your **`HOST_DATA_PATH`** folder on the host.
-4. Adjust the published port if you change `8080:8000` in the compose file.
+2. Under **Environment variables**, paste values from `stack.env.example` (set **`HOST_DATA_PATH`** to your real share path, strong secrets, and **`HOST_PORT`** if 8080 is taken).
+3. **Deploy**. The app writes under `/data/...` in the container, which is your **`HOST_DATA_PATH`** folder on the host. Open `http://<nas-ip>:<HOST_PORT>` (default **8080**).
+
+### Portainer deploy failed: “driver failed programming external connectivity”
+
+That message almost always means **Docker could not bind the published host port** (the left side of `ports:` — default **8080**) because **something else is already using it** on the Synology (another container, a DSM service, or a leftover endpoint from a previous deploy).
+
+**What to do**
+
+1. In the stack **Environment variables**, set **`HOST_PORT=8081`** (or any free port), redeploy, and browse `http://<nas-ip>:8081`.
+2. In Portainer **Containers**, remove any **old / duplicate** container from an earlier failed deploy that might still hold the port.
+3. On DSM, check **Control Panel → Login Portal** (or Web Station / reverse proxy) for services bound to 8080.
+
+The compose file uses **`${HOST_PORT:-8080}:8000`**, so you only change the **host** side; the app inside the container still listens on **8000**.
 
 ## Local development (Docker)
 

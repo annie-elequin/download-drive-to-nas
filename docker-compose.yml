@@ -2,7 +2,8 @@ services:
   app:
     build: .
     ports:
-      - "8080:8000"
+      # If deploy fails with "external connectivity", host port is likely in use — set HOST_PORT.
+      - "${HOST_PORT:-8080}:8000"
     # Optional: if this file exists next to the compose file, its keys are passed into the
     # container as environment variables (in addition to `environment` below). Compose does
     # NOT use this file for ${...} substitution in `volumes:` — use `.env` or Portainer’s stack
