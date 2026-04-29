@@ -17,35 +17,52 @@ cp .env.example .env
 
 Then edit `.env`. The app loads it automatically on startup ([python-dotenv](https://pypi.org/project/python-dotenv/) in [`app/main.py`](app/main.py)). The file is listed in `.gitignore` so it is not committed.
 
-**Docker Compose** also reads `.env` from the project root for `${VARIABLE}` substitution in `docker-compose.yml`, so the same file drives local containers.
+**Docker Compose** reads a **`.env`** file in the same directory as `docker-compose.yml` for **`${VARIABLE}` substitution** in the compose file (including the **host** side of bind mounts). That is separate from the app reading `.env` at runtime (see [`app/main.py`](app/main.py)).
 
 | Variable | Description |
 |----------|-------------|
+| `HOST_DATA_PATH` | **Host** directory bind-mounted to `/data` in the container. Example: `/volume1/Backups/drive-to-nas`. Default when unset: `./data` (repo folder). |
 | `APP_PASSWORD` | Single shared password for the web UI. Use a long random value (e.g. from a password manager). |
 | `SESSION_SECRET` | Secret used to sign session cookies. Generate a random string for production. |
-| `DATA_DIR` | Root directory for all output paths (default `/data` in Docker). Every destination you enter in the UI must resolve to a path inside this tree. |
+| `DATA_DIR` | Path **inside the container** for allowed output paths (default `/data`). You normally leave this as `/data` so it matches the mount. |
 | `DEFAULT_OUTPUT_PATH` | Optional. Prefills the destination field in the UI. If unset, the default is `<DATA_DIR>/exports`. Must lie under `DATA_DIR`. |
 
-## Portainer stack
+### Portainer stacks (`.env`, `stack.env`, and interpolation)
 
-1. Create a new stack and paste `docker-compose.yml` (or point to this repo).
-2. Set **environment** in the stack UI: `APP_PASSWORD`, `SESSION_SECRET` (do not use defaults in production).
-3. Set **volumes**: map your Synology folder to `/data`, for example:
+Portainer does **not** automatically read a random filename for **compose interpolation** (the `${...}` parts in `docker-compose.yml`, especially **`HOST_DATA_PATH`** on the volume line). You typically do one of the following:
 
-   `/volume1/Backups/drive-pull:/data`
+1. **Web editor (most common)** — When you create or update the stack, use Portainer’s **Environment variables** section and add each line, for example:
+   - `HOST_DATA_PATH=/volume1/Backups/drive-to-nas`
+   - `APP_PASSWORD=…`
+   - `SESSION_SECRET=…`  
+   Portainer passes these into Compose so `${HOST_DATA_PATH}` resolves when the stack is deployed.
 
-4. Publish a host port to container `8000` if you do not use the default `8080:8000`.
+2. **`.env` next to the compose file** — If you deploy from a Git repo or folder on disk where a **`.env`** file lives beside `docker-compose.yml`, Compose (and Portainer’s compose path) can use it for substitution the same way as on your laptop.
+
+3. **`stack.env` on the server** — Copy [`stack.env.example`](stack.env.example) to **`stack.env`** in the same directory as `docker-compose.yml` on the NAS. The compose file includes an optional `env_file: stack.env` (**`required: false`**) so missing files do not break the deploy; when **`stack.env` exists**, its variables are also passed **into the container**.  
+   **Note:** In many setups, **volume `${HOST_DATA_PATH}` still has to be available at parse time**, so you still set `HOST_DATA_PATH` in Portainer’s environment UI or in `.env` unless your workflow exports it before `docker compose` runs. Treat `stack.env` as a convenient place to hold secrets on disk; keep **`HOST_DATA_PATH`** where your Portainer/Compose version expects it for interpolation.
+
+Use [`stack.env.example`](stack.env.example) as a checklist of keys to paste or copy.
+
+You do **not** need to change the in-container path **`/data`** unless you have a special layout; only **`HOST_DATA_PATH`** (the Synology/host folder) needs to match where you want files on disk.
+
+## Portainer stack (quick steps)
+
+1. **Add stack** in Portainer and paste `docker-compose.yml`.
+2. Under **Environment variables**, paste values from `stack.env.example` (set **`HOST_DATA_PATH`** to your real share path, and strong secrets).
+3. **Deploy**. The app writes under `/data/...` in the container, which is your **`HOST_DATA_PATH`** folder on the host.
+4. Adjust the published port if you change `8080:8000` in the compose file.
 
 ## Local development (Docker)
 
 ```bash
 cp .env.example .env
-# edit .env — at minimum set APP_PASSWORD and SESSION_SECRET
-mkdir -p data
+# edit .env — set APP_PASSWORD, SESSION_SECRET, and optionally HOST_DATA_PATH (default ./data)
+mkdir -p "${HOST_DATA_PATH:-./data}"
 docker compose up --build
 ```
 
-Open `http://localhost:8080`. With the default `DATA_DIR=/data`, the form defaults to `/data/exports` (inside the compose volume `./data`). Zips land under `./data/exports/` on your machine.
+Open `http://localhost:8080`. With defaults, **`HOST_DATA_PATH=./data`** maps to `/data` in the container; the form defaults to `/data/exports`. Zips land under `./data/exports/` on your machine (or under whatever folder you set as `HOST_DATA_PATH`).
 
 ## Local development (no Docker — writes to Downloads)
 

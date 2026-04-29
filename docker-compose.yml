@@ -3,11 +3,18 @@ services:
     build: .
     ports:
       - "8080:8000"
+    # Optional: if this file exists next to the compose file, its keys are passed into the
+    # container as environment variables (in addition to `environment` below). Compose does
+    # NOT use this file for ${...} substitution in `volumes:` — use `.env` or Portainer’s stack
+    # environment for HOST_DATA_PATH and other interpolated values (see README).
+    env_file:
+      - path: stack.env
+        required: false
     environment:
-      # Values are read from a `.env` file in this directory (Compose substitutes ${...}).
       APP_PASSWORD: ${APP_PASSWORD:-changeme}
       SESSION_SECRET: ${SESSION_SECRET:-dev-insecure-change-me}
       DATA_DIR: ${DATA_DIR:-/data}
       DEFAULT_OUTPUT_PATH: ${DEFAULT_OUTPUT_PATH:-}
     volumes:
-      - ./data:/data
+      # Host path you choose (e.g. Synology share). Inside the container this is always /data.
+      - ${HOST_DATA_PATH:-./data}:/data
