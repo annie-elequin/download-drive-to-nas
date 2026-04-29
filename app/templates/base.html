@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="card">
+  <div class="card{% block card_extra_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </div>
 </body>

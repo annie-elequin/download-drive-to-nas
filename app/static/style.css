@@ -23,6 +23,10 @@ body {
   max-width: 36rem;
 }
 
+.card.card--wide {
+  max-width: 52rem;
+}
+
 h1 {
   font-size: 1.35rem;
   font-weight: 600;
@@ -110,7 +114,7 @@ pre.log {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 20rem;
+  max-height: 28rem;
   overflow-y: auto;
 }
 
@@ -136,4 +140,107 @@ pre.log {
 .status-failed {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.banner-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.banner-cancelled {
+  background: #f4f4f5;
+  border: 1px solid #d4d4d8;
+  color: #3f3f46;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.files-overall-pct {
+  font-weight: 500;
+  font-size: 0.85em;
+  color: #71717a;
+}
+
+.file-progress {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  margin-bottom: 1.25rem;
+}
+
+.file-progress th,
+.file-progress td {
+  border: 1px solid #e4e4e7;
+  padding: 0.4rem 0.55rem;
+  text-align: left;
+}
+
+.file-progress th {
+  background: #fafafa;
+  font-weight: 600;
+}
+
+.file-progress .td-name {
+  word-break: break-word;
+  max-width: 28rem;
+}
+
+.file-progress .td-pct {
+  white-space: nowrap;
+  width: 4.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-progress .td-st {
+  width: 7rem;
+  text-transform: capitalize;
+}
+
+.td-muted {
+  color: #71717a;
+  font-style: italic;
+}
+
+.btn-cancel {
+  background: #f4f4f5;
+  color: #18181b;
+  border: 1px solid #d4d4d8;
+  margin-bottom: 1rem;
+}
+
+.btn-cancel:hover {
+  background: #e4e4e7;
+}
+
+.btn-cancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.status-cancelled {
+  background: #e4e4e7;
+  color: #3f3f46;
+}
+
+.status-detail {
+  font-size: 0.875rem;
+  color: #3f3f46;
+  margin: 0 0 1rem;
+  line-height: 1.45;
+  min-height: 1.4em;
+}
+
+.poll-hint {
+  font-size: 0.8125rem;
+  color: #71717a;
+  margin: 0 0 1rem;
 }

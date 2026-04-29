@@ -1,41 +1,206 @@
 {% extends "base.html" %}
+{% block card_extra_class %} card--wide{% endblock %}
 {% block title %}Job {{ job.id[:8] }} · Drive to NAS{% endblock %}
 {% block content %}
+{% if job.status.value == 'failed' %}
+<div class="banner-error" id="error-banner" role="alert">{{ job.message }}</div>
+{% else %}
+<div class="banner-error" id="error-banner" role="alert" hidden></div>
+{% endif %}
+{% if job.status.value == 'cancelled' %}
+<div class="banner-cancelled" id="cancel-banner" role="status">{{ job.message }}</div>
+{% else %}
+<div class="banner-cancelled" id="cancel-banner" role="status" hidden></div>
+{% endif %}
 <h1>Job status</h1>
 <p>
-  <span class="status-badge status-{{ job.status.value }}">{{ job.status.value }}</span>
-  {% if job.message %}<span> — {{ job.message }}</span>{% endif %}
+  <span class="status-badge status-{{ job.status.value }}" id="status-badge">{{ job.status.value }}</span>
+  <span id="status-message">{% if job.message and job.status.value not in ('failed', 'cancelled') %} — {{ job.message }}{% endif %}</span>
 </p>
+<p class="status-detail" id="job-phase">{{ job.phase or " " }}</p>
 {% if job.destination_path %}
 <p>Destination: <code>{{ job.destination_path }}</code></p>
 {% endif %}
-{% if job.zip_path %}
-<p>Output: <code>{{ job.zip_path }}</code></p>
-{% endif %}
-{% if job.status.value in ('pending', 'running') %}
-<p id="poll-hint">Refreshing…</p>
+<p id="zip-line" {% if not job.zip_path %}hidden{% endif %}>{% if job.zip_path %}Output: <code id="zip-path">{{ job.zip_path }}</code>{% endif %}</p>
+<form method="post" action="/jobs/{{ job.id }}/cancel" id="cancel-form" class="cancel-form" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="btn-cancel" id="cancel-btn">Cancel download</button>
+</form>
+<h2>Files <span id="files-overall-pct" class="files-overall-pct">{% if job.files %}{% set done = job.files | selectattr('status', 'equalto', 'complete') | list | length %}({{ (100 * done // (job.files | length)) }}%){% endif %}</span></h2>
+<p class="hint" style="margin-top:-0.25rem">Rows appear when gdown prints <code>Processing file</code>. Percent comes from tqdm output when gdown emits it (often in bursts until a newline). The header % is completed files ÷ total discovered files.</p>
+<table class="file-progress" aria-label="Download progress by file">
+  <thead>
+    <tr><th>Name</th><th>Progress</th><th>Status</th></tr>
+  </thead>
+  <tbody id="file-rows"></tbody>
+</table>
+<p id="poll-hint" class="poll-hint">{% if job.status.value in ('pending', 'running') %}Waiting for first status update…{% endif %}</p>
 <script>
 (function() {
   const id = {{ job.id | tojson }};
+  const initialStatus = {{ job.status.value | tojson }};
+
+  function updateFilesOverallPct(files) {
+    var el = document.getElementById('files-overall-pct');
+    if (!el) return;
+    if (!files || !files.length) {
+      el.textContent = '';
+      return;
+    }
+    var done = 0;
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].status === 'complete') done += 1;
+    }
+    el.textContent = '(' + Math.round(100 * done / files.length) + '%)';
+  }
+
+  function renderFiles(files) {
+    var tbody = document.getElementById('file-rows');
+    if (!tbody) return;
+    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    if (!files || files.length === 0) {
+      var tr0 = document.createElement('tr');
+      var td0 = document.createElement('td');
+      td0.colSpan = 3;
+      td0.className = 'td-muted';
+      td0.textContent = 'Discovered files will appear here as gdown reports them.';
+      tr0.appendChild(td0);
+      tbody.appendChild(tr0);
+      return;
+    }
+    files.forEach(function(f) {
+      var tr = document.createElement('tr');
+      var tdN = document.createElement('td');
+      tdN.className = 'td-name';
+      tdN.textContent = f.name || '';
+      var tdP = document.createElement('td');
+      tdP.className = 'td-pct';
+      tdP.textContent = (f.percent != null ? f.percent : 0) + '%';
+      var tdS = document.createElement('td');
+      tdS.className = 'td-st';
+      tdS.textContent = f.status || 'pending';
+      tr.appendChild(tdN);
+      tr.appendChild(tdP);
+      tr.appendChild(tdS);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function apply(data) {
+    renderFiles(data.files);
+    updateFilesOverallPct(data.files);
+    var logEl = document.getElementById('job-log');
+    if (logEl) logEl.textContent = data.log || '(empty)';
+    var phaseEl = document.getElementById('job-phase');
+    if (phaseEl) phaseEl.textContent = data.phase || '';
+    var badge = document.getElementById('status-badge');
+    if (badge) {
+      badge.textContent = data.status;
+      badge.className = 'status-badge status-' + data.status;
+    }
+    var msgEl = document.getElementById('status-message');
+    if (msgEl) {
+      if (data.status === 'failed' || data.status === 'cancelled') msgEl.textContent = '';
+      else msgEl.textContent = data.message ? ' — ' + data.message : '';
+    }
+    var err = document.getElementById('error-banner');
+    if (err) {
+      if (data.status === 'failed') {
+        err.textContent = data.message || 'Job failed';
+        err.hidden = false;
+      } else {
+        err.hidden = true;
+        err.textContent = '';
+      }
+    }
+    var cban = document.getElementById('cancel-banner');
+    if (cban) {
+      if (data.status === 'cancelled') {
+        cban.textContent = data.message || 'Cancelled';
+        cban.hidden = false;
+      } else {
+        cban.hidden = true;
+        cban.textContent = '';
+      }
+    }
+    var zipLine = document.getElementById('zip-line');
+    var zipPath = document.getElementById('zip-path');
+    if (data.zip_path) {
+      if (!zipPath && zipLine) {
+        zipLine.innerHTML = 'Output: <code id="zip-path"></code>';
+        zipPath = document.getElementById('zip-path');
+      }
+      if (zipPath) zipPath.textContent = data.zip_path;
+      if (zipLine) zipLine.hidden = false;
+    } else if (zipLine && data.status !== 'running' && data.status !== 'pending') {
+      zipLine.hidden = true;
+    }
+    var cform = document.getElementById('cancel-form');
+    if (cform) cform.hidden = !data.cancellable;
+    var hint = document.getElementById('poll-hint');
+    if (hint) {
+      if (data.status === 'pending' || data.status === 'running') {
+        hint.textContent = 'Last updated ' + new Date().toLocaleTimeString() + ' — still working…';
+      } else if (data.status === 'failed') {
+        hint.textContent = 'Finished with errors at ' + new Date().toLocaleTimeString() + '.';
+      } else if (data.status === 'cancelled') {
+        hint.textContent = 'Stopped at ' + new Date().toLocaleTimeString() + '.';
+      } else {
+        hint.textContent = 'Finished at ' + new Date().toLocaleTimeString() + '.';
+      }
+    }
+    if (logEl) logEl.scrollTop = logEl.scrollHeight;
+  }
+
   function tick() {
     fetch('/api/jobs/' + id, { credentials: 'same-origin' })
-      .then(r => { if (r.status === 401) { window.location = '/login'; return null; } return r.json(); })
-      .then(data => {
+      .then(function(r) {
+        if (r.status === 401) { window.location = '/login'; return null; }
+        return r.json();
+      })
+      .then(function(data) {
         if (!data) return;
+        apply(data);
         if (data.status === 'pending' || data.status === 'running') {
-          setTimeout(tick, 2000);
-        } else {
-          window.location.reload();
+          setTimeout(tick, 1500);
         }
       })
-      .catch(() => setTimeout(tick, 3000));
+      .catch(function() {
+        var hint = document.getElementById('poll-hint');
+        if (hint) hint.textContent = 'Lost connection — retrying…';
+        setTimeout(tick, 3000);
+      });
   }
-  setTimeout(tick, 1500);
+
+  var cform = document.getElementById('cancel-form');
+  if (cform) {
+    cform.addEventListener('submit', function() {
+      var btn = document.getElementById('cancel-btn');
+      if (btn) btn.disabled = true;
+    });
+  }
+
+  var initialFiles = {{ job.files | tojson }};
+  renderFiles(initialFiles);
+  updateFilesOverallPct(initialFiles);
+
+  if (initialStatus === 'pending' || initialStatus === 'running') {
+    tick();
+  } else {
+    apply({
+      status: {{ job.status.value | tojson }},
+      message: {{ job.message | tojson }},
+      phase: {{ job.phase | tojson }},
+      log: {{ job.log | tojson }},
+      zip_path: {{ job.zip_path | tojson }},
+      files: {{ job.files | tojson }},
+      cancellable: false
+    });
+  }
 })();
 </script>
-{% endif %}
 <h2>Log</h2>
-<pre class="log">{{ job.log or '(empty)' }}</pre>
+<pre class="log" id="job-log">{{ job.log or '(empty)' }}</pre>
 <div class="row">
   <a href="/">New job</a>
   <form method="post" action="/logout">

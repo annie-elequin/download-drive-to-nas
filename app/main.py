@@ -151,6 +151,20 @@ def create_job_route(
     return RedirectResponse(f"/jobs/{job.id}", status_code=303)
 
 
+@app.post("/jobs/{job_id}/cancel", response_model=None)
+def cancel_job_route(
+    request: Request,
+    _: auth.CurrentUserHtmlDep,
+    job_id: str,
+    csrf_token: Annotated[str, Form()],
+) -> RedirectResponse:
+    auth.require_csrf(request, csrf_token)
+    ok, msg = jobs.request_cancel(job_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
 def job_status_page(
     request: Request,
@@ -177,15 +191,4 @@ def job_status_api(
     job = jobs.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return JSONResponse(
-        {
-            "id": job.id,
-            "status": job.status.value,
-            "message": job.message,
-            "log": job.log,
-            "zip_path": job.zip_path,
-            "destination_path": job.destination_path,
-            "created_at": job.created_at,
-            "finished_at": job.finished_at,
-        }
-    )
+    return JSONResponse(jobs.job_public_dict(job))
