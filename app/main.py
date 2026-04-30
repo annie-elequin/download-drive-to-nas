@@ -296,7 +296,7 @@ def batch_approve(
     return JSONResponse(result)
 
 
-@app.get("/batch/jobs-summary", response_class=HTMLResponse)
+@app.get("/batch/jobs-summary", response_class=HTMLResponse, response_model=None)
 def batch_jobs_summary(
     request: Request,
     _: auth.CurrentUserHtmlDep,
