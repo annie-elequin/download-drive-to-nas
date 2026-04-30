@@ -142,6 +142,20 @@ pre.log {
   color: #991b1b;
 }
 
+.banner-warn {
+  background: #3d3420;
+  border: 1px solid #8a7530;
+  color: #f5e6c8;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.banner-warn .skip-list {
+  margin: 0.5rem 0 0 1.1rem;
+  padding: 0;
+}
+
 .banner-error {
   background: #fef2f2;
   border: 1px solid #fecaca;
@@ -175,6 +189,11 @@ pre.log {
   border-collapse: collapse;
   font-size: 0.8125rem;
   margin-bottom: 1.25rem;
+}
+
+.file-progress .td-url {
+  word-break: break-all;
+  max-width: 36rem;
 }
 
 .file-progress th,

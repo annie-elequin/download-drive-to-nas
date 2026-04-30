@@ -171,10 +171,10 @@ def _discover_worker(batch_id: str) -> None:
 def approve_batch(
     batch_id: str,
     selections: list[dict[str, Any]],
-) -> list[str]:
+) -> dict[str, Any]:
     """
     selections: [{ "index": 0, "include_stl": true, "beautyshot_ids": ["id1", ...] }, ...]
-    Returns created job ids.
+    Returns {"job_ids": [...], "started": [{ "job_id", "source_url" }, ...]}.
     """
     batch = get_batch(batch_id)
     if not batch:
@@ -185,6 +185,7 @@ def approve_batch(
 
     by_index = {s.get("index"): s for s in selections}
     job_ids: list[str] = []
+    started: list[dict[str, str]] = []
 
     for it in batch.items:
         sel = by_index.get(it.index) or {}
@@ -213,7 +214,8 @@ def approve_batch(
         job = jobs.create_selective_job(it.source_url, dest, archive, spec)
         jobs.start_job_worker(job.id)
         job_ids.append(job.id)
+        started.append({"job_id": job.id, "source_url": it.source_url})
 
     with _lock:
         batch.phase = f"Started {len(job_ids)} download job(s). Open each job page for progress."
-    return job_ids
+    return {"job_ids": job_ids, "started": started}

@@ -44,6 +44,7 @@ class Job:
     log: str = ""
     zip_path: str | None = None
     files: list[dict[str, Any]] = field(default_factory=list)
+    skipped_downloads: list[str] = field(default_factory=list)
     cancel_requested: bool = False
     proc: subprocess.Popen | None = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -185,6 +186,8 @@ def _run_selective_pipeline(job: Job) -> None:
 
         _set_phase(job, f"Downloading {len(beauty)} beautyshot(s) and {len(stl_files)} STL file(s)…")
 
+        ok_count = 0
+
         for b in beauty:
             with _job_fields_lock:
                 if job.cancel_requested:
@@ -192,8 +195,21 @@ def _run_selective_pipeline(job: Job) -> None:
                     return
             bn = _safe_download_basename(b["name"])
             out = tmp_path / bn
-            _append_log(job, f"→ {bn}\n")
-            download(id=b["id"], output=str(out), quiet=True, use_cookies=True)
+            bid = b.get("id") or ""
+            try:
+                _append_log(job, f"→ {bn}\n")
+                download(id=b["id"], output=str(out), quiet=True, use_cookies=True)
+                ok_count += 1
+            except Exception as exc:
+                line = f"Beautyshot {bn!r} (id={bid}): {exc}"
+                with _job_fields_lock:
+                    job.skipped_downloads.append(line)
+                _append_log(job, f"SKIP: {line}\n")
+                if out.exists():
+                    try:
+                        out.unlink()
+                    except OSError:
+                        pass
 
         for sf in stl_files:
             with _job_fields_lock:
@@ -203,13 +219,39 @@ def _run_selective_pipeline(job: Job) -> None:
             rel = _safe_rel_path(sf.get("path") or "")
             out = tmp_path / rel
             out.parent.mkdir(parents=True, exist_ok=True)
-            _append_log(job, f"→ {rel.as_posix()}\n")
-            download(id=sf["id"], output=str(out), quiet=True, use_cookies=True)
+            sid = sf.get("id") or ""
+            try:
+                _append_log(job, f"→ {rel.as_posix()}\n")
+                download(id=sf["id"], output=str(out), quiet=True, use_cookies=True)
+                ok_count += 1
+            except Exception as exc:
+                line = f"STL {rel.as_posix()!r} (id={sid}): {exc}"
+                with _job_fields_lock:
+                    job.skipped_downloads.append(line)
+                _append_log(job, f"SKIP: {line}\n")
+                if out.exists():
+                    try:
+                        out.unlink()
+                    except OSError:
+                        pass
 
         with _job_fields_lock:
             if job.cancel_requested:
                 _finalize_cancelled(job, tmp_root, "\nCancelled before ZIP.\n")
                 return
+
+        if ok_count == 0:
+            with _job_fields_lock:
+                lines = list(job.skipped_downloads)
+            detail = "Every file download failed (nothing to zip). See log for each error.\n" + "\n".join(
+                lines
+            )
+            with _job_fields_lock:
+                job.status = JobStatus.FAILED
+                job.message = "All selected files failed to download."
+            _set_phase(job, "Failed.")
+            _append_log(job, f"\n{detail}\n")
+            return
 
         zip_base = dest_dir / archive_name
         _append_log(job, f"\nCreating ZIP: {zip_base}.zip\n")
@@ -218,10 +260,16 @@ def _run_selective_pipeline(job: Job) -> None:
         zip_file = dest_dir / f"{archive_name}.zip"
         if not zip_file.is_file():
             raise RuntimeError("Zip file was not created")
+        n_skip = len(job.skipped_downloads)
         with _job_fields_lock:
             job.zip_path = str(zip_file)
             job.status = JobStatus.SUCCESS
-            job.message = "Done"
+            if n_skip:
+                job.message = (
+                    f"ZIP created; {n_skip} file(s) skipped (see Skipped downloads below and the log)."
+                )
+            else:
+                job.message = "Done"
         _set_phase(job, "Complete.")
         _append_log(job, f"Wrote: {zip_file}\n")
     except Exception as exc:
@@ -279,6 +327,7 @@ def job_public_dict(job: Job) -> dict:
             "files": [dict(f) for f in job.files],
             "cancellable": cancellable,
             "job_kind": job.job_kind,
+            "skipped_downloads": list(job.skipped_downloads),
             "created_at": job.created_at,
             "finished_at": job.finished_at,
         }

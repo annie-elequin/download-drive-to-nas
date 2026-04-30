@@ -287,10 +287,31 @@ def batch_approve(
     if not isinstance(selections, list):
         raise HTTPException(status_code=400, detail="Invalid selection format")
     try:
-        job_ids = batches.approve_batch(batch_id, selections)
+        result = batches.approve_batch(batch_id, selections)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return JSONResponse({"job_ids": job_ids})
+    started = result.get("started") or []
+    if started:
+        request.session["last_batch_jobs"] = started
+    return JSONResponse(result)
+
+
+@app.get("/batch/jobs-summary", response_class=HTMLResponse)
+def batch_jobs_summary(
+    request: Request,
+    _: auth.CurrentUserHtmlDep,
+) -> RedirectResponse | HTMLResponse:
+    rows = request.session.get("last_batch_jobs")
+    if not rows:
+        return RedirectResponse("/batch", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "batch_jobs_summary.html",
+        {
+            "csrf_token": auth.session_csrf(request),
+            "rows": rows,
+        },
+    )
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)

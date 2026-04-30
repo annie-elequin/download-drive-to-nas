@@ -124,7 +124,8 @@
           return;
         }
         var ids = res.j.job_ids || [];
-        if (ids.length) window.location = '/jobs/' + ids[0];
+        if (ids.length > 1) window.location = '/batch/jobs-summary';
+        else if (ids.length === 1) window.location = '/jobs/' + ids[0];
         else window.location = '/batch';
       });
   });

@@ -16,6 +16,7 @@
 {% if job.job_kind == 'selective' %}
 <p class="hint">This job downloaded only selected beautyshot file(s) and the <code>_STL</code> tree (not the whole Drive folder).</p>
 {% endif %}
+<div id="skip-banner" class="banner-warn" role="status" hidden></div>
 <p>
   <span class="status-badge status-{{ job.status.value }}" id="status-badge">{{ job.status.value }}</span>
   <span id="status-message">{% if job.message and job.status.value not in ('failed', 'cancelled') %} — {{ job.message }}{% endif %}</span>
@@ -89,6 +90,12 @@
     });
   }
 
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
   function apply(data) {
     renderFiles(data.files);
     updateFilesOverallPct(data.files);
@@ -114,6 +121,21 @@
       } else {
         err.hidden = true;
         err.textContent = '';
+      }
+    }
+    var skipBanner = document.getElementById('skip-banner');
+    if (skipBanner) {
+      var skips = data.skipped_downloads || [];
+      if (skips.length) {
+        skipBanner.innerHTML =
+          '<strong>Skipped or failed downloads</strong> (retry these files individually if needed):' +
+          '<ul class="skip-list">' +
+          skips.map(function(s) { return '<li>' + escHtml(s) + '</li>'; }).join('') +
+          '</ul>';
+        skipBanner.hidden = false;
+      } else {
+        skipBanner.innerHTML = '';
+        skipBanner.hidden = true;
       }
     }
     var cban = document.getElementById('cancel-banner');
@@ -197,6 +219,7 @@
       log: {{ job.log | tojson }},
       zip_path: {{ job.zip_path | tojson }},
       files: {{ job.files | tojson }},
+      skipped_downloads: {{ job.skipped_downloads | tojson }},
       cancellable: false
     });
   }

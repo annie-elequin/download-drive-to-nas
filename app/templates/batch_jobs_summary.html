@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block card_extra_class %} card--wide{% endblock %}
+{% block title %}Batch downloads · Drive to NAS{% endblock %}
+{% block content %}
+<h1>Batch download jobs</h1>
+<p class="hint">Each row is a separate job. Open a job for full log and any <strong>skipped files</strong>. Failed jobs stay listed here so you can retry those Drive links individually from <a href="/">New job</a>.</p>
+<table class="file-progress" id="summary-table">
+  <thead>
+    <tr><th>Job</th><th>Drive folder</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr data-job-id="{{ r.job_id }}">
+      <td><a href="/jobs/{{ r.job_id }}"><code>{{ r.job_id[:10] }}…</code></a></td>
+      <td class="td-url"><code>{{ r.source_url }}</code></td>
+      <td class="sum-status"><span class="status-badge status-pending">…</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="row"><a href="/batch">New batch</a> · <a href="/">One folder ZIP</a></p>
+<form method="post" action="/logout" class="row">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="button-link">Sign out</button>
+</form>
+<script>
+(function() {
+  const rows = {{ rows | tojson }};
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function badgeClass(st) {
+    if (st === 'success') return 'status-badge status-success';
+    if (st === 'failed') return 'status-badge status-failed';
+    if (st === 'cancelled') return 'status-badge status-cancelled';
+    return 'status-badge status-' + st;
+  }
+
+  function renderRow(tr, data) {
+    var st = data.status || 'pending';
+    var td = tr.querySelector('.sum-status');
+    if (!td) return;
+    var hint = '';
+    var skips = data.skipped_downloads || [];
+    if (skips.length && st === 'success') {
+      hint = ' <span class="td-muted">(' + skips.length + ' skipped)</span>';
+    } else if (skips.length && st === 'failed') {
+      hint = ' <span class="td-muted">(' + skips.length + ' failed)</span>';
+    }
+    td.innerHTML = '<span class="' + badgeClass(st) + '">' + esc(st) + '</span>' + hint;
+  }
+
+  function tick() {
+    var pending = false;
+    var fetches = rows.map(function(r) {
+      return fetch('/api/jobs/' + r.job_id, { credentials: 'same-origin' })
+        .then(function(res) {
+          if (res.status === 401) { window.location = '/login'; return null; }
+          return res.json();
+        })
+        .then(function(data) {
+          if (!data) return;
+          var tr = document.querySelector('tr[data-job-id="' + r.job_id + '"]');
+          if (tr) renderRow(tr, data);
+          if (data.status === 'pending' || data.status === 'running') pending = true;
+        });
+    });
+    Promise.all(fetches).then(function() {
+      if (pending) setTimeout(tick, 2000);
+    }).catch(function() { setTimeout(tick, 3500); });
+  }
+
+  rows.forEach(function(r) {
+    var tr = document.querySelector('tr[data-job-id="' + r.job_id + '"]');
+    if (tr) renderRow(tr, { status: 'pending' });
+  });
+  tick();
+})();
+</script>
+{% endblock %}
