@@ -17,6 +17,7 @@
   <input type="text" id="archive_base" name="archive_base" placeholder="Optional — default is archive_…" pattern="[a-zA-Z0-9_.-]*" title="Letters, numbers, dot, underscore, hyphen">
   <button type="submit">Start download</button>
 </form>
+<p class="row"><a href="/batch">Batch: many folders (beautyshot + <code>_STL</code> only)</a></p>
 <form method="post" action="/logout" class="row">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <button type="submit" class="button-link">Sign out</button>

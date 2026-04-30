@@ -34,6 +34,8 @@ RE_PERCENT = re.compile(r"(\d{1,3})%")
 class Job:
     id: str
     status: JobStatus = JobStatus.PENDING
+    job_kind: str = "full"  # "full" | "selective"
+    selective: dict[str, Any] | None = None
     drive_url: str = ""
     destination_path: str = ""
     archive_base: str = ""
@@ -112,6 +114,139 @@ def create_job(drive_url: str, destination_path: str, archive_base: str) -> Job:
     return job
 
 
+def create_selective_job(
+    drive_url: str,
+    destination_path: str,
+    archive_base: str,
+    spec: dict[str, Any],
+) -> Job:
+    """Download only chosen beautyshot files + listed STL tree files, then zip."""
+    job_id = uuid.uuid4().hex
+    safe_destination_path(destination_path)
+    ab = sanitize_segment(archive_base) if archive_base.strip() else ""
+    job = Job(
+        id=job_id,
+        job_kind="selective",
+        selective=dict(spec),
+        drive_url=drive_url.strip(),
+        destination_path=destination_path.strip(),
+        archive_base=ab,
+        phase="Queued (selective download)…",
+    )
+    _jobs[job_id] = job
+    return job
+
+
+def _safe_download_basename(name: str) -> str:
+    b = os.path.basename((name or "").replace("\\", "/"))
+    if not b or b in (".", "..") or ".." in b or "/" in b or "\\" in b:
+        raise ValueError(f"Unsafe filename: {name!r}")
+    return b
+
+
+def _safe_rel_path(path: str) -> Path:
+    parts = [p for p in path.replace("\\", "/").split("/") if p and p != "."]
+    for p in parts:
+        if p == ".." or p.startswith(".."):
+            raise ValueError("Invalid path in STL file list")
+    return Path(*parts) if parts else Path("file")
+
+
+def _run_selective_pipeline(job: Job) -> None:
+    from gdown import download
+
+    with _pipeline_lock:
+        with _job_fields_lock:
+            if job.cancel_requested:
+                job.status = JobStatus.CANCELLED
+                job.message = "Cancelled"
+                job.phase = "Cancelled."
+                job.finished_at = datetime.now(timezone.utc).isoformat()
+                return
+            job.status = JobStatus.RUNNING
+
+    spec = job.selective or {}
+    tmp_root: str | None = None
+    try:
+        dest_dir = safe_destination_path(job.destination_path)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        archive_name = job.archive_base or f"archive_{job.id[:8]}"
+        archive_name = sanitize_segment(archive_name, max_len=200)
+        if archive_name.endswith(".zip"):
+            archive_name = archive_name[:-4]
+
+        tmp_root = tempfile.mkdtemp(prefix="sel_")
+        tmp_path = Path(tmp_root)
+        _append_log(job, f"Selective pack from: {job.drive_url}\n")
+        _append_log(job, f"Temp directory: {tmp_path}\n")
+
+        beauty = list(spec.get("beautyshots") or [])
+        stl_files = list(spec.get("stl_files") or [])
+
+        _set_phase(job, f"Downloading {len(beauty)} beautyshot(s) and {len(stl_files)} STL file(s)…")
+
+        for b in beauty:
+            with _job_fields_lock:
+                if job.cancel_requested:
+                    _finalize_cancelled(job, tmp_root, "\nCancelled during selective download.\n")
+                    return
+            bn = _safe_download_basename(b["name"])
+            out = tmp_path / bn
+            _append_log(job, f"→ {bn}\n")
+            download(id=b["id"], output=str(out), quiet=True, use_cookies=True)
+
+        for sf in stl_files:
+            with _job_fields_lock:
+                if job.cancel_requested:
+                    _finalize_cancelled(job, tmp_root, "\nCancelled during selective download.\n")
+                    return
+            rel = _safe_rel_path(sf.get("path") or "")
+            out = tmp_path / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _append_log(job, f"→ {rel.as_posix()}\n")
+            download(id=sf["id"], output=str(out), quiet=True, use_cookies=True)
+
+        with _job_fields_lock:
+            if job.cancel_requested:
+                _finalize_cancelled(job, tmp_root, "\nCancelled before ZIP.\n")
+                return
+
+        zip_base = dest_dir / archive_name
+        _append_log(job, f"\nCreating ZIP: {zip_base}.zip\n")
+        _set_phase(job, "Creating ZIP archive…")
+        shutil.make_archive(str(zip_base), "zip", root_dir=str(tmp_path))
+        zip_file = dest_dir / f"{archive_name}.zip"
+        if not zip_file.is_file():
+            raise RuntimeError("Zip file was not created")
+        with _job_fields_lock:
+            job.zip_path = str(zip_file)
+            job.status = JobStatus.SUCCESS
+            job.message = "Done"
+        _set_phase(job, "Complete.")
+        _append_log(job, f"Wrote: {zip_file}\n")
+    except Exception as exc:
+        with _job_fields_lock:
+            cancelled_here = job.cancel_requested
+        if cancelled_here:
+            _finalize_cancelled(job, tmp_root, "\nCancelled.\n")
+            return
+        with _job_fields_lock:
+            job.status = JobStatus.FAILED
+            job.message = str(exc)
+        _set_phase(job, "Failed.")
+        _append_log(job, f"\nError: {exc}\n")
+    finally:
+        with _job_fields_lock:
+            st = job.status
+            if job.finished_at is None:
+                job.finished_at = datetime.now(timezone.utc).isoformat()
+        if tmp_root and os.path.isdir(tmp_root) and st != JobStatus.CANCELLED:
+            try:
+                shutil.rmtree(tmp_root, ignore_errors=True)
+            except OSError:
+                pass
+
+
 def get_job(job_id: str) -> Job | None:
     return _jobs.get(job_id)
 
@@ -143,6 +278,7 @@ def job_public_dict(job: Job) -> dict:
             "destination_path": job.destination_path,
             "files": [dict(f) for f in job.files],
             "cancellable": cancellable,
+            "job_kind": job.job_kind,
             "created_at": job.created_at,
             "finished_at": job.finished_at,
         }
@@ -454,7 +590,10 @@ def start_job_worker(job_id: str) -> None:
         return
 
     def run() -> None:
-        _run_pipeline(job)
+        if job.job_kind == "selective":
+            _run_selective_pipeline(job)
+        else:
+            _run_pipeline(job)
 
     t = threading.Thread(target=run, daemon=True)
     t.start()

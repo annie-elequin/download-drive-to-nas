@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block card_extra_class %} card--wide{% endblock %}
+{% block title %}Batch STL + beautyshot · Drive to NAS{% endblock %}
+{% block content %}
+<h1>Batch: many Drive folders</h1>
+<p class="hint">Paste one <strong>Google Drive folder URL</strong> per line (public / “anyone with link”). We discover each folder, then you confirm we picked the right <strong>root file with “beautyshot” in the name</strong> and the <strong>folder whose name ends with <code>_STL</code></strong> before downloading.</p>
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+<form method="post" action="/batches/discover">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="urls">Folder links (one per line)</label>
+  <textarea id="urls" name="urls" rows="14" required placeholder="https://drive.google.com/drive/folders/…"></textarea>
+  <label for="destination_path">Destination folder (full path, under DATA_DIR)</label>
+  <input type="text" id="destination_path" name="destination_path" required value="{{ default_destination }}" spellcheck="false" autocomplete="off">
+  <p class="hint">Each approved link becomes its own ZIP in this folder. Max URLs: {{ max_urls }} (override with <code>BATCH_MAX_URLS</code>).</p>
+  <button type="submit">Discover folders</button>
+</form>
+<p class="row"><a href="/">Classic: download one full folder as ZIP</a></p>
+<form method="post" action="/logout" class="row">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="button-link">Sign out</button>
+</form>
+{% endblock %}

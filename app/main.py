@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from typing import Annotated
@@ -12,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, jobs
+from app import auth, batches, jobs
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -163,6 +164,133 @@ def cancel_job_route(
     if not ok:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@app.get("/batch", response_class=HTMLResponse)
+def batch_page(
+    request: Request,
+    _: auth.CurrentUserHtmlDep,
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "batch.html",
+        {
+            "csrf_token": auth.session_csrf(request),
+            "error": None,
+            "default_destination": jobs.default_output_suggestion(),
+            "max_urls": batches.max_urls(),
+        },
+    )
+
+
+@app.post("/batches/discover", response_model=None)
+def batch_discover(
+    request: Request,
+    _: auth.CurrentUserHtmlDep,
+    urls: Annotated[str, Form()],
+    destination_path: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+) -> RedirectResponse | HTMLResponse:
+    auth.require_csrf(request, csrf_token)
+    parsed = batches.parse_urls_blob(urls)
+    if not parsed:
+        return templates.TemplateResponse(
+            request,
+            "batch.html",
+            {
+                "csrf_token": auth.rotate_csrf(request),
+                "error": "Paste at least one folder URL.",
+                "default_destination": destination_path.strip() or jobs.default_output_suggestion(),
+                "max_urls": batches.max_urls(),
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    for u in parsed:
+        try:
+            _validate_drive_url(u)
+        except HTTPException as exc:
+            msg = exc.detail if isinstance(exc.detail, str) else "Invalid URL"
+            return templates.TemplateResponse(
+                request,
+                "batch.html",
+                {
+                    "csrf_token": auth.rotate_csrf(request),
+                    "error": msg,
+                    "default_destination": destination_path.strip() or jobs.default_output_suggestion(),
+                    "max_urls": batches.max_urls(),
+                },
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    try:
+        batch = batches.create_batch(parsed, destination_path)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "batch.html",
+            {
+                "csrf_token": auth.rotate_csrf(request),
+                "error": str(exc),
+                "default_destination": destination_path.strip() or jobs.default_output_suggestion(),
+                "max_urls": batches.max_urls(),
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    auth.rotate_csrf(request)
+    return RedirectResponse(f"/batches/{batch.id}/review", status_code=303)
+
+
+@app.get("/batches/{batch_id}/review", response_class=HTMLResponse)
+def batch_review_page(
+    request: Request,
+    _: auth.CurrentUserHtmlDep,
+    batch_id: str,
+) -> HTMLResponse:
+    batch = batches.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return templates.TemplateResponse(
+        request,
+        "batch_review.html",
+        {
+            "batch": batch,
+            "csrf_token": auth.session_csrf(request),
+            "initial": batches.batch_public_dict(batch),
+        },
+    )
+
+
+@app.get("/api/batches/{batch_id}")
+def batch_status_api(
+    request: Request,
+    _: auth.CurrentUserApiDep,
+    batch_id: str,
+) -> JSONResponse:
+    batch = batches.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return JSONResponse(batches.batch_public_dict(batch))
+
+
+@app.post("/batches/{batch_id}/approve")
+def batch_approve(
+    request: Request,
+    _: auth.CurrentUserApiDep,
+    batch_id: str,
+    csrf_token: Annotated[str, Form()],
+    selection_json: Annotated[str, Form()] = "",
+) -> JSONResponse:
+    auth.require_csrf(request, csrf_token)
+    try:
+        selections = json.loads(selection_json or "[]")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid selection JSON") from exc
+    if not isinstance(selections, list):
+        raise HTTPException(status_code=400, detail="Invalid selection format")
+    try:
+        job_ids = batches.approve_batch(batch_id, selections)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"job_ids": job_ids})
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)

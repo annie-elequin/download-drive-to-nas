@@ -13,6 +13,9 @@
 <div class="banner-cancelled" id="cancel-banner" role="status" hidden></div>
 {% endif %}
 <h1>Job status</h1>
+{% if job.job_kind == 'selective' %}
+<p class="hint">This job downloaded only selected beautyshot file(s) and the <code>_STL</code> tree (not the whole Drive folder).</p>
+{% endif %}
 <p>
   <span class="status-badge status-{{ job.status.value }}" id="status-badge">{{ job.status.value }}</span>
   <span id="status-message">{% if job.message and job.status.value not in ('failed', 'cancelled') %} — {{ job.message }}{% endif %}</span>

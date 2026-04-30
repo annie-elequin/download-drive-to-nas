@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block card_extra_class %} card--wide{% endblock %}
+{% block title %}Review batch · Drive to NAS{% endblock %}
+{% block content %}
+<h1>Review batch</h1>
+<p id="batch-phase" class="status-detail">{{ batch.phase }}</p>
+<p class="hint">When status is <strong>ready</strong>, adjust checkboxes and click <strong>Approve &amp; download</strong>. Each checked row creates one ZIP job (beautyshot file(s) + all files under the <code>_STL</code> folder if enabled).</p>
+<div id="batch-error" class="error" hidden></div>
+<div id="review-table-wrap"></div>
+<p class="row">
+  <button type="button" id="approve-btn" disabled>Approve & download</button>
+  <a href="/batch">New batch</a>
+</p>
+<form method="post" action="/logout" class="row">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="button-link">Sign out</button>
+</form>
+<script>
+(function() {
+  const batchId = {{ batch.id | tojson }};
+  const csrf = {{ csrf_token | tojson }};
+  const initial = {{ initial | tojson }};
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function render(data) {
+    var phase = document.getElementById('batch-phase');
+    if (phase) phase.textContent = data.phase || data.status || '';
+    var wrap = document.getElementById('review-table-wrap');
+    var btn = document.getElementById('approve-btn');
+    var err = document.getElementById('batch-error');
+    if (err) { err.hidden = true; err.textContent = ''; }
+
+    if (data.status === 'discovering') {
+      if (wrap) wrap.innerHTML = '<p class="td-muted">Discovering folders…</p>';
+      if (btn) btn.disabled = true;
+      return;
+    }
+    if (data.status === 'failed') {
+      if (wrap) wrap.innerHTML = '<pre class="log">' + esc(data.log || '') + '</pre>';
+      if (btn) btn.disabled = true;
+      return;
+    }
+
+    var rows = (data.items || []).map(function(it) {
+      var ok = it.status === 'ok';
+      var bs = it.beautyshots || [];
+      var bsChecks = bs.map(function(b) {
+        return '<label class="chk"><input type="checkbox" class="bs-cb" data-id="' + esc(b.id) + '" checked> ' + esc(b.name) + '</label>';
+      }).join(' ');
+      if (!bsChecks) bsChecks = '<span class="td-muted">(none)</span>';
+      var stl = it.stl_folder ? (esc(it.stl_folder) + ' — ' + (it.stl_file_count || 0) + ' file(s)') : '—';
+      var note = it.note ? '<div class="hint">' + esc(it.note) + '</div>' : '';
+      var other = '';
+      if ((it.other_root_files && it.other_root_files.length) || (it.other_root_folders && it.other_root_folders.length)) {
+        other = '<details class="hint"><summary>Other names at root (not downloaded)</summary><code>' +
+          esc((it.other_root_folders || []).concat(it.other_root_files || []).join(', ')) + '</code></details>';
+      }
+      var zipHint = '';
+      if (ok && it.parent_folder) {
+        zipHint = '<div class="hint">ZIP file name uses this Drive folder title (not the <code>_STL</code> subfolder): <strong>' + esc(it.parent_folder) + '</strong>.</div>';
+      }
+      var meta = (zipHint || note || other) ? '<div class="batch-row-meta">' + zipHint + note + other + '</div>' : '';
+      return '<tr data-index="' + it.index + '">' +
+        '<td><input type="checkbox" class="row-include" ' + (ok ? 'checked' : '') + (ok ? '' : ' disabled') + '></td>' +
+        '<td><code>' + esc(it.source_url.substring(0, 72)) + (it.source_url.length > 72 ? '…' : '') + '</code>' + meta + '</td>' +
+        '<td>' + (ok ? bsChecks : '<span class="error">' + esc(it.error || 'error') + '</span>') + '</td>' +
+        '<td>' + (ok ? '<label class="chk"><input type="checkbox" class="stl-cb" checked> ' + stl + '</label>' : '—') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    if (wrap) {
+      wrap.innerHTML = '<table class="file-progress batch-review"><thead><tr><th>Use</th><th>Link</th><th>Beautyshot(s)</th><th>STL folder</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+    if (btn) btn.disabled = data.status !== 'ready';
+  }
+
+  function tick() {
+    fetch('/api/batches/' + batchId, { credentials: 'same-origin' })
+      .then(function(r) { if (r.status === 401) { window.location = '/login'; return null; } return r.json(); })
+      .then(function(data) {
+        if (!data) return;
+        render(data);
+        if (data.status === 'discovering') setTimeout(tick, 1200);
+      })
+      .catch(function() { setTimeout(tick, 2500); });
+  }
+
+  document.getElementById('approve-btn').addEventListener('click', function() {
+    var selections = [];
+    document.querySelectorAll('tr[data-index]').forEach(function(tr) {
+      var idx = parseInt(tr.getAttribute('data-index'), 10);
+      var inc = tr.querySelector('.row-include');
+      if (!inc || !inc.checked) return;
+      var stlEl = tr.querySelector('.stl-cb');
+      var stlOn = stlEl ? stlEl.checked : false;
+      var ids = [];
+      tr.querySelectorAll('.bs-cb').forEach(function(cb) {
+        if (cb.checked) ids.push(cb.getAttribute('data-id'));
+      });
+      selections.push({ index: idx, include_stl: stlOn, beautyshot_ids: ids });
+    });
+    var fd = new FormData();
+    fd.append('csrf_token', csrf);
+    fd.append('selection_json', JSON.stringify(selections));
+    fetch('/batches/' + batchId + '/approve', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function(r) {
+        return r.text().then(function(t) {
+          var j = {};
+          try { j = t ? JSON.parse(t) : {}; } catch (e) { j = { detail: t || r.statusText }; }
+          return { ok: r.ok, j: j };
+        });
+      })
+      .then(function(res) {
+        var err = document.getElementById('batch-error');
+        if (!res.ok) {
+          var d = res.j.detail;
+          var msg = typeof d === 'string' ? d : (Array.isArray(d) ? JSON.stringify(d) : JSON.stringify(res.j));
+          if (err) { err.textContent = msg; err.hidden = false; }
+          return;
+        }
+        var ids = res.j.job_ids || [];
+        if (ids.length) window.location = '/jobs/' + ids[0];
+        else window.location = '/batch';
+      });
+  });
+
+  render(initial);
+  if (initial.status === 'discovering') tick();
+})();
+</script>
+{% endblock %}
