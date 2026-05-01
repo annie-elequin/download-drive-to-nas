@@ -253,6 +253,24 @@ def _run_selective_pipeline(job: Job) -> None:
             _append_log(job, f"\n{detail}\n")
             return
 
+        with _job_fields_lock:
+            n_skipped = len(job.skipped_downloads)
+        if n_skipped > 0:
+            with _job_fields_lock:
+                lines = list(job.skipped_downloads)
+            detail = (
+                f"{n_skipped} file(s) could not be downloaded; incomplete model — ZIP not created.\n"
+                + "\n".join(lines)
+            )
+            with _job_fields_lock:
+                job.status = JobStatus.FAILED
+                job.message = (
+                    f"{n_skipped} file(s) failed to download; incomplete archive not written."
+                )
+            _set_phase(job, "Failed.")
+            _append_log(job, f"\n{detail}\n")
+            return
+
         zip_base = dest_dir / archive_name
         _append_log(job, f"\nCreating ZIP: {zip_base}.zip\n")
         _set_phase(job, "Creating ZIP archive…")
@@ -260,16 +278,10 @@ def _run_selective_pipeline(job: Job) -> None:
         zip_file = dest_dir / f"{archive_name}.zip"
         if not zip_file.is_file():
             raise RuntimeError("Zip file was not created")
-        n_skip = len(job.skipped_downloads)
         with _job_fields_lock:
             job.zip_path = str(zip_file)
             job.status = JobStatus.SUCCESS
-            if n_skip:
-                job.message = (
-                    f"ZIP created; {n_skip} file(s) skipped (see Skipped downloads below and the log)."
-                )
-            else:
-                job.message = "Done"
+            job.message = "Done"
         _set_phase(job, "Complete.")
         _append_log(job, f"Wrote: {zip_file}\n")
     except Exception as exc:

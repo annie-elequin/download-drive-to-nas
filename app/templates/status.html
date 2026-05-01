@@ -128,7 +128,7 @@
       var skips = data.skipped_downloads || [];
       if (skips.length) {
         skipBanner.innerHTML =
-          '<strong>Skipped or failed downloads</strong> (retry these files individually if needed):' +
+          '<strong>Files that failed to download</strong> (fix sharing or retry individually):' +
           '<ul class="skip-list">' +
           skips.map(function(s) { return '<li>' + escHtml(s) + '</li>'; }).join('') +
           '</ul>';

@@ -3,7 +3,7 @@
 {% block title %}Batch downloads · Drive to NAS{% endblock %}
 {% block content %}
 <h1>Batch download jobs</h1>
-<p class="hint">Each row is a separate job. Open a job for full log and any <strong>skipped files</strong>. Failed jobs stay listed here so you can retry those Drive links individually from <a href="/">New job</a>.</p>
+<p class="hint">Each row is a separate job. A job <strong>fails</strong> if any selected file could not be downloaded (no ZIP is written for an incomplete model). Open a job for the full log. Retry failed Drive links individually from <a href="/">New job</a>.</p>
 <table class="file-progress" id="summary-table">
   <thead>
     <tr><th>Job</th><th>Drive folder</th><th>Status</th></tr>
@@ -46,10 +46,8 @@
     if (!td) return;
     var hint = '';
     var skips = data.skipped_downloads || [];
-    if (skips.length && st === 'success') {
-      hint = ' <span class="td-muted">(' + skips.length + ' skipped)</span>';
-    } else if (skips.length && st === 'failed') {
-      hint = ' <span class="td-muted">(' + skips.length + ' failed)</span>';
+    if (skips.length && st === 'failed') {
+      hint = ' <span class="td-muted">(' + skips.length + ' file error' + (skips.length === 1 ? '' : 's') + ')</span>';
     }
     td.innerHTML = '<span class="' + badgeClass(st) + '">' + esc(st) + '</span>' + hint;
   }
