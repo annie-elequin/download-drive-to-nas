@@ -41,10 +41,96 @@
   <tbody id="file-rows"></tbody>
 </table>
 <p id="poll-hint" class="poll-hint">{% if job.status.value in ('pending', 'running') %}Waiting for first status update…{% endif %}</p>
+<p id="chime-hint" class="hint" style="margin-top:-0.35rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>When the job finishes (success, failed, or cancelled), a ~1.5s chime plays if this page was open while it was running. Use the slider for volume (saved in this browser). If nothing plays, click <strong>Test sound</strong> once — some browsers need a click before audio works.</p>
+<div class="row chime-controls" style="margin-top:0.2rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem 1rem">
+  <label for="chime-volume" style="margin:0">Chime volume</label>
+  <input type="range" id="chime-volume" min="0" max="100" value="50" aria-label="Completion chime volume">
+  <span id="chime-volume-value" class="td-muted" style="min-width:2.75rem">50%</span>
+  <button type="button" id="chime-test-btn">Test sound</button>
+</div>
 <script>
 (function() {
   const id = {{ job.id | tojson }};
   const initialStatus = {{ job.status.value | tojson }};
+  var chimed = false;
+  var everRunning = initialStatus === 'pending' || initialStatus === 'running';
+  var CHIME_VOL_KEY = 'drive-to-nas-job-chime-volume';
+
+  function getChimeVolume01() {
+    var el = document.getElementById('chime-volume');
+    if (!el) return 0.5;
+    var n = parseInt(el.value, 10);
+    if (isNaN(n)) return 0.5;
+    return Math.min(1, Math.max(0, n / 100));
+  }
+
+  function syncChimeVolumeLabel() {
+    var el = document.getElementById('chime-volume');
+    var lab = document.getElementById('chime-volume-value');
+    if (!el || !lab) return;
+    lab.textContent = el.value + '%';
+  }
+
+  function initChimeVolume() {
+    var el = document.getElementById('chime-volume');
+    if (!el) return;
+    try {
+      var s = localStorage.getItem(CHIME_VOL_KEY);
+      if (s !== null && !isNaN(parseInt(s, 10))) {
+        el.value = String(Math.min(100, Math.max(0, parseInt(s, 10))));
+      }
+    } catch (e) {}
+    syncChimeVolumeLabel();
+    el.addEventListener('input', function() {
+      try { localStorage.setItem(CHIME_VOL_KEY, el.value); } catch (e) {}
+      syncChimeVolumeLabel();
+    });
+  }
+
+  /** Soft major-third “bell”, exactly 1.5s; loudness from slider (0 = silent). */
+  function playDoneChime() {
+    try {
+      var vol = getChimeVolume01();
+      if (vol <= 0) return;
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      var ctx = new Ctx();
+      var t0 = ctx.currentTime;
+      var total = 1.5;
+      /* Two sines sum; keep peak modest — volume slider is the main control */
+      var peak = 0.0001 + vol * 0.11;
+
+      var o1 = ctx.createOscillator();
+      var o2 = ctx.createOscillator();
+      var g = ctx.createGain();
+      o1.type = 'sine';
+      o2.type = 'sine';
+      o1.frequency.value = 523.25;
+      o2.frequency.value = 659.25;
+      o1.connect(g);
+      o2.connect(g);
+      g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.07);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * 0.35), t0 + 0.55);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + total);
+      o1.start(t0);
+      o2.start(t0);
+      o1.stop(t0 + total + 0.02);
+      o2.stop(t0 + total + 0.02);
+      setTimeout(function() {
+        try { ctx.close(); } catch (e) {}
+      }, total * 1000 + 120);
+    } catch (e) { /* autoplay / AudioContext */ }
+  }
+
+  function maybeChime(data) {
+    if (chimed || !everRunning) return;
+    var t = data.status;
+    if (t === 'pending' || t === 'running') return;
+    chimed = true;
+    playDoneChime();
+  }
 
   function updateFilesOverallPct(files) {
     var el = document.getElementById('files-overall-pct');
@@ -177,6 +263,12 @@
       }
     }
     if (logEl) logEl.scrollTop = logEl.scrollHeight;
+    maybeChime(data);
+    var chHint = document.getElementById('chime-hint');
+    if (chHint) {
+      if (data.status === 'pending' || data.status === 'running') chHint.hidden = false;
+      else chHint.hidden = true;
+    }
   }
 
   function tick() {
@@ -206,6 +298,14 @@
       if (btn) btn.disabled = true;
     });
   }
+
+  var chimeTest = document.getElementById('chime-test-btn');
+  if (chimeTest) {
+    chimeTest.addEventListener('click', function() {
+      playDoneChime();
+    });
+  }
+  initChimeVolume();
 
   var initialFiles = {{ job.files | tojson }};
   renderFiles(initialFiles);
