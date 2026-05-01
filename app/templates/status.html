@@ -32,6 +32,17 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <button type="submit" class="btn-cancel" id="cancel-btn">Cancel download</button>
 </form>
+<p id="chime-hint" class="hint" style="margin-top:0.35rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>When the job finishes (success, failed, or cancelled), two short bright chimes play if this page saw the job running — usually right when you return to this tab, because browsers slow updates while the tab is in the background. Use the slider for volume (saved in this browser). Click <strong>Test sound</strong> or tap anywhere once after load so audio is allowed to play. Optional: enable <strong>Notify when finished</strong> below for a system notification that works in the background (HTTPS or localhost).</p>
+<div class="row chime-controls" style="margin-top:0.2rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem 1rem">
+  <label for="chime-volume" style="margin:0">Chime volume</label>
+  <input type="range" id="chime-volume" min="0" max="100" value="50" aria-label="Completion chime volume">
+  <span id="chime-volume-value" class="td-muted" style="min-width:2.75rem">50%</span>
+  <button type="button" id="chime-test-btn">Test sound</button>
+</div>
+<div id="notify-row" class="row notify-row" style="margin-top:0.35rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem 1rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>
+  <button type="button" id="notify-enable-btn">Notify when finished</button>
+  <span id="notify-status" class="td-muted" style="max-width:28rem"></span>
+</div>
 <h2>Files <span id="files-overall-pct" class="files-overall-pct">{% if job.files %}{% set done = job.files | selectattr('status', 'equalto', 'complete') | list | length %}({{ (100 * done // (job.files | length)) }}%){% endif %}</span></h2>
 <p class="hint" style="margin-top:-0.25rem">Rows appear when gdown prints <code>Processing file</code>. Percent comes from tqdm output when gdown emits it (often in bursts until a newline). The header % is completed files ÷ total discovered files.</p>
 <table class="file-progress" aria-label="Download progress by file">
@@ -41,17 +52,12 @@
   <tbody id="file-rows"></tbody>
 </table>
 <p id="poll-hint" class="poll-hint">{% if job.status.value in ('pending', 'running') %}Waiting for first status update…{% endif %}</p>
-<p id="chime-hint" class="hint" style="margin-top:-0.35rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>When the job finishes (success, failed, or cancelled), two short bright chimes play if this page saw the job running. Use the slider for volume (saved in this browser). Browsers often block audio until you interact with the page — click <strong>Test sound</strong> or anywhere on the page once after it loads, then the completion chime should work too.</p>
-<div class="row chime-controls" style="margin-top:0.2rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem 1rem">
-  <label for="chime-volume" style="margin:0">Chime volume</label>
-  <input type="range" id="chime-volume" min="0" max="100" value="50" aria-label="Completion chime volume">
-  <span id="chime-volume-value" class="td-muted" style="min-width:2.75rem">50%</span>
-  <button type="button" id="chime-test-btn">Test sound</button>
-</div>
 <script>
 (function() {
   const id = {{ job.id | tojson }};
   const initialStatus = {{ job.status.value | tojson }};
+  /** Page load was a live job — used to poll once when the tab is foregrounded (background tabs throttle timers). */
+  var initialHadLiveJob = initialStatus === 'pending' || initialStatus === 'running';
   var chimed = false;
   /** True once we have seen this job in pending/running (initial HTML or any poll). */
   var sawRunningOrPending = initialStatus === 'pending' || initialStatus === 'running';
@@ -68,16 +74,16 @@
   }
 
   function attachChimeGestureUnlock() {
-    document.body.addEventListener(
-      'click',
-      function chimeUnlock() {
-        try {
-          var c = getChimeAudioContext();
-          if (c && c.state === 'suspended') c.resume();
-        } catch (e) {}
-      },
-      { capture: true, passive: true }
-    );
+    function unlock() {
+      try {
+        var c = getChimeAudioContext();
+        if (c && c.state === 'suspended') c.resume();
+      } catch (e) {}
+    }
+    var opts = { capture: true, passive: true };
+    window.addEventListener('pointerdown', unlock, opts);
+    window.addEventListener('click', unlock, opts);
+    window.addEventListener('touchstart', unlock, opts);
   }
 
   function getChimeVolume01() {
@@ -160,8 +166,76 @@
     if (chimed || !sawRunningOrPending) return;
     var t = data.status;
     if (t === 'pending' || t === 'running') return;
+    if (document.hidden) return;
     chimed = true;
     playDoneChime();
+  }
+
+  var jobNotified = false;
+
+  function notificationsSupported() {
+    return typeof Notification !== 'undefined';
+  }
+
+  function syncNotifyUi() {
+    var btn = document.getElementById('notify-enable-btn');
+    var st = document.getElementById('notify-status');
+    if (!btn || !st) return;
+    if (!notificationsSupported()) {
+      btn.hidden = true;
+      st.textContent = 'Browser notifications are not available in this context (try HTTPS or localhost).';
+      return;
+    }
+    btn.hidden = false;
+    if (Notification.permission === 'granted') {
+      btn.textContent = 'Notifications on';
+      btn.disabled = true;
+      st.textContent = 'You will get a system notification when this job finishes, even if this tab is in the background.';
+    } else if (Notification.permission === 'denied') {
+      btn.textContent = 'Notifications blocked';
+      btn.disabled = true;
+      st.textContent = 'Allow notifications for this site in your browser settings to enable this.';
+    } else {
+      btn.textContent = 'Notify when finished';
+      btn.disabled = false;
+      st.textContent = 'Uses the Notifications API — works while you use other tabs or apps.';
+    }
+  }
+
+  function truncate(s, max) {
+    if (!s || s.length <= max) return s || '';
+    return s.slice(0, max - 1) + '…';
+  }
+
+  function notifyJobFinished(data) {
+    if (jobNotified || !sawRunningOrPending) return;
+    var t = data.status;
+    if (t === 'pending' || t === 'running') return;
+    if (!notificationsSupported() || Notification.permission !== 'granted') return;
+    jobNotified = true;
+    var shortId = id.length > 8 ? id.slice(0, 8) + '…' : id;
+    var title = 'Drive to NAS · job ' + shortId;
+    var body = '';
+    if (t === 'success') {
+      body = data.zip_path
+        ? 'Finished — ZIP: ' + truncate(String(data.zip_path), 140)
+        : truncate(String(data.message || 'Download completed successfully.'), 200);
+    } else if (t === 'failed') {
+      body = truncate(String(data.message || 'Download failed. Open the job page for details.'), 200);
+    } else if (t === 'cancelled') {
+      body = truncate(String(data.message || 'Download cancelled.'), 200);
+    } else {
+      body = 'Job status: ' + t;
+    }
+    try {
+      var n = new Notification(title, { body: body, tag: 'drive-to-nas-job-' + id });
+      n.onclick = function() {
+        window.focus();
+        try {
+          n.close();
+        } catch (e) {}
+      };
+    } catch (e) {}
   }
 
   function updateFilesOverallPct(files) {
@@ -299,10 +373,16 @@
     }
     if (logEl) logEl.scrollTop = logEl.scrollHeight;
     maybeChime(data);
+    notifyJobFinished(data);
     var chHint = document.getElementById('chime-hint');
     if (chHint) {
       if (data.status === 'pending' || data.status === 'running') chHint.hidden = false;
       else chHint.hidden = true;
+    }
+    var notifyRow = document.getElementById('notify-row');
+    if (notifyRow) {
+      if (data.status === 'pending' || data.status === 'running') notifyRow.hidden = false;
+      else notifyRow.hidden = true;
     }
   }
 
@@ -326,6 +406,13 @@
       });
   }
 
+  function onPageForeground() {
+    if (document.hidden || !initialHadLiveJob) return;
+    tick();
+  }
+  document.addEventListener('visibilitychange', onPageForeground);
+  window.addEventListener('focus', onPageForeground);
+
   var cform = document.getElementById('cancel-form');
   if (cform) {
     cform.addEventListener('submit', function() {
@@ -342,6 +429,22 @@
   }
   initChimeVolume();
   attachChimeGestureUnlock();
+
+  var notifyBtn = document.getElementById('notify-enable-btn');
+  if (notifyBtn) {
+    notifyBtn.addEventListener('click', function() {
+      if (!notificationsSupported()) return;
+      var p = Notification.requestPermission();
+      if (p && typeof p.then === 'function') {
+        p.then(function() {
+          syncNotifyUi();
+        });
+      } else {
+        syncNotifyUi();
+      }
+    });
+  }
+  syncNotifyUi();
 
   var initialFiles = {{ job.files | tojson }};
   renderFiles(initialFiles);
