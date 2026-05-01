@@ -361,6 +361,61 @@ def _match_pending_file_index(files: list[dict[str, Any]], to_path: str) -> int 
     return None
 
 
+def _verify_tracked_full_folder_files(job: Job, tmp_path: Path) -> list[str]:
+    """After gdown exits 0, ensure every tracked file exists and finished; else return problem lines."""
+    issues: list[str] = []
+    base = tmp_path.resolve()
+    with _job_fields_lock:
+        rows = [dict(f) for f in job.files]
+    for f in rows:
+        st = f.get("status") or ""
+        if st == "cancelled":
+            continue
+        name = (f.get("name") or "").strip()
+        if not name:
+            continue
+        rel = name.replace("\\", "/")
+        parts = [p for p in rel.split("/") if p and p != "."]
+        if not parts:
+            issues.append(f"Invalid empty path in file list: {rel!r}")
+            continue
+        if any(p == ".." or p.startswith("..") for p in parts):
+            issues.append(f"Unsafe path in file list: {rel!r}")
+            continue
+        target = tmp_path.joinpath(*parts).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            issues.append(f"Path escaped temp dir: {rel!r}")
+            continue
+        exists = target.is_file()
+        if st == "complete":
+            if not exists:
+                issues.append(f"Marked complete but missing on disk: {rel!r}")
+        elif st == "pending":
+            if not exists:
+                issues.append(f"Never downloaded: {rel!r}")
+        elif st == "downloading":
+            if not exists:
+                issues.append(f"Incomplete download (no file on disk): {rel!r}")
+        else:
+            if not exists:
+                issues.append(f"Not downloaded (status={st!r}): {rel!r}")
+    return issues
+
+
+def _full_folder_log_suggests_file_failures(log: str) -> bool:
+    if not log:
+        return False
+    markers = (
+        "Failed to retrieve file url",
+        "Cannot retrieve the public link",
+        "Failed to retrieve folder contents",
+        "Download ended unsuccessfully",
+    )
+    return any(m in log for m in markers)
+
+
 def _parse_gdown_progress_line(job: Job, line: str, ctx: dict[str, Any]) -> None:
     """Update job.files from a single gdown log line (best-effort; tqdm uses \\r so % may batch)."""
     raw = line.rstrip("\n\r")
@@ -571,14 +626,23 @@ def _run_pipeline(job: Job) -> None:
             if proc.returncode != 0:
                 raise RuntimeError(f"gdown exited with code {proc.returncode}")
 
-            ai = ctx.get("active_idx")
-            with _job_fields_lock:
-                if isinstance(ai, int) and 0 <= ai < len(job.files):
-                    if job.files[ai].get("status") == "downloading":
-                        job.files[ai]["status"] = "complete"
-                        job.files[ai]["percent"] = 100
-
             _set_phase(job, "Verifying downloaded files…")
+            file_issues = _verify_tracked_full_folder_files(job, tmp_path)
+            with _job_fields_lock:
+                log_snip = job.log or ""
+            issues = list(file_issues)
+            if not issues and _full_folder_log_suggests_file_failures(log_snip):
+                issues.append(
+                    "gdown log contains file retrieval or download errors; see log for details."
+                )
+            if issues:
+                with _job_fields_lock:
+                    job.skipped_downloads.clear()
+                    job.skipped_downloads.extend(issues)
+                raise RuntimeError(
+                    f"Incomplete folder download ({len(issues)} problem(s)); ZIP not created."
+                )
+
             entries = list(tmp_path.iterdir())
             if not entries:
                 raise RuntimeError("Download produced no files")

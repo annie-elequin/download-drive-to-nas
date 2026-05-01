@@ -15,6 +15,8 @@
 <h1>Job status</h1>
 {% if job.job_kind == 'selective' %}
 <p class="hint">This job downloaded only selected beautyshot file(s) and the <code>STL</code> or <code>*_STL</code> tree (not the whole Drive folder).</p>
+{% elif job.job_kind == 'full' %}
+<p class="hint">Full folder download: if any file in the folder does not finish downloading, the job fails and no ZIP is written.</p>
 {% endif %}
 <div id="skip-banner" class="banner-warn" role="status" hidden></div>
 <p>
