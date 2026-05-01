@@ -41,7 +41,7 @@
   <tbody id="file-rows"></tbody>
 </table>
 <p id="poll-hint" class="poll-hint">{% if job.status.value in ('pending', 'running') %}Waiting for first status update…{% endif %}</p>
-<p id="chime-hint" class="hint" style="margin-top:-0.35rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>When the job finishes (success, failed, or cancelled), a ~1.5s chime plays if this page was open while it was running. Use the slider for volume (saved in this browser). If nothing plays, click <strong>Test sound</strong> once — some browsers need a click before audio works.</p>
+<p id="chime-hint" class="hint" style="margin-top:-0.35rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>When the job finishes (success, failed, or cancelled), a ~1.5s chime plays if this page saw the job running. Use the slider for volume (saved in this browser). Browsers often block audio until you interact with the page — click <strong>Test sound</strong> or anywhere on the page once after it loads, then the completion chime should work too.</p>
 <div class="row chime-controls" style="margin-top:0.2rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem 1rem">
   <label for="chime-volume" style="margin:0">Chime volume</label>
   <input type="range" id="chime-volume" min="0" max="100" value="50" aria-label="Completion chime volume">
@@ -53,8 +53,32 @@
   const id = {{ job.id | tojson }};
   const initialStatus = {{ job.status.value | tojson }};
   var chimed = false;
-  var everRunning = initialStatus === 'pending' || initialStatus === 'running';
+  /** True once we have seen this job in pending/running (initial HTML or any poll). */
+  var sawRunningOrPending = initialStatus === 'pending' || initialStatus === 'running';
   var CHIME_VOL_KEY = 'drive-to-nas-job-chime-volume';
+  var _chimeAudioCtx = null;
+
+  function getChimeAudioContext() {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!_chimeAudioCtx || _chimeAudioCtx.state === 'closed') {
+      _chimeAudioCtx = new Ctx();
+    }
+    return _chimeAudioCtx;
+  }
+
+  function attachChimeGestureUnlock() {
+    document.body.addEventListener(
+      'click',
+      function chimeUnlock() {
+        try {
+          var c = getChimeAudioContext();
+          if (c && c.state === 'suspended') c.resume();
+        } catch (e) {}
+      },
+      { capture: true, passive: true }
+    );
+  }
 
   function getChimeVolume01() {
     var el = document.getElementById('chime-volume');
@@ -87,45 +111,49 @@
     });
   }
 
-  /** Soft major-third “bell”, exactly 1.5s; loudness from slider (0 = silent). */
+  /** Soft G–B major third on triangle waves (~1.5s); loudness from slider (0 = silent). */
   function playDoneChime() {
     try {
       var vol = getChimeVolume01();
       if (vol <= 0) return;
-      var Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
-      var ctx = new Ctx();
-      var t0 = ctx.currentTime;
-      var total = 1.5;
-      /* Two sines sum; keep peak modest — volume slider is the main control */
-      var peak = 0.0001 + vol * 0.11;
+      var ctx = getChimeAudioContext();
+      if (!ctx) return;
 
-      var o1 = ctx.createOscillator();
-      var o2 = ctx.createOscillator();
-      var g = ctx.createGain();
-      o1.type = 'sine';
-      o2.type = 'sine';
-      o1.frequency.value = 523.25;
-      o2.frequency.value = 659.25;
-      o1.connect(g);
-      o2.connect(g);
-      g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.07);
-      g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * 0.35), t0 + 0.55);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + total);
-      o1.start(t0);
-      o2.start(t0);
-      o1.stop(t0 + total + 0.02);
-      o2.stop(t0 + total + 0.02);
-      setTimeout(function() {
-        try { ctx.close(); } catch (e) {}
-      }, total * 1000 + 120);
+      function schedule() {
+        var t0 = ctx.currentTime;
+        var total = 1.5;
+        var peak = 0.0001 + vol * 0.095;
+
+        var o1 = ctx.createOscillator();
+        var o2 = ctx.createOscillator();
+        var g = ctx.createGain();
+        o1.type = 'triangle';
+        o2.type = 'triangle';
+        o1.frequency.value = 392;
+        o2.frequency.value = 493.88;
+        o1.connect(g);
+        o2.connect(g);
+        g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(peak, t0 + 0.09);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * 0.42), t0 + 0.48);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + total);
+        o1.start(t0);
+        o2.start(t0);
+        o1.stop(t0 + total + 0.02);
+        o2.stop(t0 + total + 0.02);
+      }
+
+      if (ctx.state === 'suspended') {
+        ctx.resume().then(schedule).catch(schedule);
+      } else {
+        schedule();
+      }
     } catch (e) { /* autoplay / AudioContext */ }
   }
 
   function maybeChime(data) {
-    if (chimed || !everRunning) return;
+    if (chimed || !sawRunningOrPending) return;
     var t = data.status;
     if (t === 'pending' || t === 'running') return;
     chimed = true;
@@ -185,6 +213,9 @@
   }
 
   function apply(data) {
+    if (data.status === 'pending' || data.status === 'running') {
+      sawRunningOrPending = true;
+    }
     renderFiles(data.files);
     updateFilesOverallPct(data.files);
     var logEl = document.getElementById('job-log');
@@ -306,6 +337,7 @@
     });
   }
   initChimeVolume();
+  attachChimeGestureUnlock();
 
   var initialFiles = {{ job.files | tojson }};
   renderFiles(initialFiles);
