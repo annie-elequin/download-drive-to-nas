@@ -155,7 +155,9 @@ def _discover_worker(batch_id: str) -> None:
                         for b in (r.beautyshots or [])
                     ]
                     if not it.beautyshots:
-                        it.note = (it.note + " " if it.note else "") + "No root file with 'beautyshot' in the name."
+                        it.note = (it.note + " " if it.note else "") + (
+                            "No file with 'beautyshot' in the name at folder root or under Render Images/."
+                        )
         with _lock:
             batch.status = "ready"
             batch.phase = "Review selections below, then approve."

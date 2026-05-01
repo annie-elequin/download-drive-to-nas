@@ -3,7 +3,7 @@
 {% block title %}Batch STL + beautyshot · Drive to NAS{% endblock %}
 {% block content %}
 <h1>Batch: many Drive folders</h1>
-<p class="hint">Paste one <strong>Google Drive folder URL</strong> per line (public / “anyone with link”). We discover each folder, then you confirm we picked the right <strong>root file with “beautyshot” in the name</strong> and the <strong>folder whose name ends with <code>_STL</code></strong> before downloading.</p>
+<p class="hint">Paste one <strong>Google Drive folder URL</strong> per line (public / “anyone with link”). We discover each folder, then you confirm we picked the right <strong>beautyshot</strong> (root-level file with “beautyshot” in the name, or, if none at the root, the first matching file under <code>Render Images/</code> by name) and the <strong><code>STL</code> folder</strong> (exact name, case-insensitive) or a folder whose name <strong>ends with <code>_STL</code></strong> before downloading.</p>
 {% if error %}
 <p class="error">{{ error }}</p>
 {% endif %}

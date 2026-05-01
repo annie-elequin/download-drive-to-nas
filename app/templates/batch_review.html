@@ -4,7 +4,7 @@
 {% block content %}
 <h1>Review batch</h1>
 <p id="batch-phase" class="status-detail">{{ batch.phase }}</p>
-<p class="hint">When status is <strong>ready</strong>, adjust checkboxes and click <strong>Approve &amp; download</strong>. Each checked row creates one ZIP job (beautyshot file(s) + all files under the <code>_STL</code> folder if enabled).</p>
+<p class="hint">When status is <strong>ready</strong>, adjust checkboxes and click <strong>Approve &amp; download</strong>. Each checked row creates one ZIP job (beautyshot file(s) + all files under the <code>STL</code> or <code>*_STL</code> folder if enabled).</p>
 <div id="batch-error" class="error" hidden></div>
 <div id="review-table-wrap"></div>
 <p class="row">
@@ -62,7 +62,7 @@
       }
       var zipHint = '';
       if (ok && it.parent_folder) {
-        zipHint = '<div class="hint">ZIP file name uses this Drive folder title (not the <code>_STL</code> subfolder): <strong>' + esc(it.parent_folder) + '</strong>.</div>';
+        zipHint = '<div class="hint">ZIP file name uses this Drive folder title (not the <code>STL</code> / <code>*_STL</code> subfolder): <strong>' + esc(it.parent_folder) + '</strong>.</div>';
       }
       var meta = (zipHint || note || other) ? '<div class="batch-row-meta">' + zipHint + note + other + '</div>' : '';
       return '<tr data-index="' + it.index + '">' +
