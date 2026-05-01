@@ -17,6 +17,17 @@ def _is_render_images_folder(segment: str) -> bool:
     return segment.strip().lower() == "render images"
 
 
+def _is_beautyshot_filename(name: str) -> bool:
+    """
+    Beauty-style pack shot: filename contains 'beautyshot', or starts with BS_ / BS-
+    (case-insensitive; BS_ avoids matching e.g. Bust.jpg).
+    """
+    n = (name or "").strip().lower()
+    if "beautyshot" in n:
+        return True
+    return n.startswith("bs_") or n.startswith("bs-")
+
+
 def _is_stl_root_folder(segment: str) -> bool:
     """Top-level folder named STL, or * _STL suffix (e.g. Ashitaka_STL)."""
     s = segment.strip().lower()
@@ -78,7 +89,7 @@ def _parent_folder_from_gdown_paths(entries: list[Any], output_dir: str) -> str 
 
 def _analyze_entries(entries: list[Any]) -> DiscoveryResult:
     """Split gdown skip_download entries into beautyshots vs STL tree (folder STL or *_STL)."""
-    root_beautyshots: list[dict[str, Any]] = []
+    root_beauty_candidates: list[dict[str, Any]] = []
     render_beautyshots: list[dict[str, Any]] = []
     stl_by_prefix: dict[str, list[dict[str, Any]]] = {}
     other_files: list[str] = []
@@ -92,8 +103,8 @@ def _analyze_entries(entries: list[Any]) -> DiscoveryResult:
         parts = path.split("/")
         if len(parts) == 1:
             name = parts[0]
-            if "beautyshot" in name.lower():
-                root_beautyshots.append({"id": fid, "name": name})
+            if _is_beautyshot_filename(name):
+                root_beauty_candidates.append({"id": fid, "name": name})
             else:
                 other_files.append(name)
             continue
@@ -103,29 +114,32 @@ def _analyze_entries(entries: list[Any]) -> DiscoveryResult:
             stl_by_prefix.setdefault(root, []).append({"id": fid, "path": path})
         else:
             root_folders.add(root)
-            if (
-                _is_render_images_folder(root)
-                and len(parts) >= 2
-                and "beautyshot" in parts[-1].lower()
-            ):
+            if _is_render_images_folder(root) and len(parts) >= 2 and _is_beautyshot_filename(parts[-1]):
                 # Flat name for ZIP temp dir (unique if nested under Render Images)
                 out_name = parts[-1] if len(parts) == 2 else "__".join(parts[1:])
                 render_beautyshots.append({"id": fid, "name": out_name})
             else:
                 other_files.append(path)
 
+    root_trim_note: str | None = None
     render_trim_note: str | None = None
-    if root_beautyshots:
-        beautyshots = root_beautyshots
+
+    def _beauty_sort_key(b: dict[str, Any]) -> tuple[str, str]:
+        return (str(b.get("name", "")).lower(), str(b.get("id", "")))
+
+    if root_beauty_candidates:
+        rb_sorted = sorted(root_beauty_candidates, key=_beauty_sort_key)
+        beautyshots = [rb_sorted[0]]
+        if len(root_beauty_candidates) > 1:
+            root_trim_note = (
+                f"Several beautyshot-style files at folder root; using only the first ({rb_sorted[0]['name']!r})."
+            )
     elif render_beautyshots:
-        rb_sorted = sorted(
-            render_beautyshots,
-            key=lambda b: (str(b.get("name", "")).lower(), str(b.get("id", ""))),
-        )
+        rb_sorted = sorted(render_beautyshots, key=_beauty_sort_key)
         beautyshots = [rb_sorted[0]]
         if len(render_beautyshots) > 1:
             render_trim_note = (
-                f"Several beautyshots under Render Images/; using only the first ({rb_sorted[0]['name']!r})."
+                f"Several matches under Render Images/; using only the first ({rb_sorted[0]['name']!r})."
             )
     else:
         beautyshots = []
@@ -144,7 +158,9 @@ def _analyze_entries(entries: list[Any]) -> DiscoveryResult:
 
     chosen, stl_note = _choose_stl_folder(stl_by_prefix)
     note = stl_note
-    if not root_beautyshots and render_beautyshots:
+    if root_trim_note:
+        note = f"{note} {root_trim_note}".strip() if note else root_trim_note
+    if not root_beauty_candidates and render_beautyshots:
         extra = "Beautyshot from Render Images/ (none at folder root)."
         note = f"{note} {extra}".strip() if note else extra
         if render_trim_note:
@@ -164,8 +180,8 @@ def _analyze_entries(entries: list[Any]) -> DiscoveryResult:
 def discover_public_folder(url: str) -> DiscoveryResult:
     """
     List contents of a public folder without downloading (gdown skip_download).
-    Identifies beautyshot files (root-level names containing 'beautyshot', or if none,
-    the first matching file under Render Images/ by filename), and files under a top-level
+    Identifies one beautyshot file: root-level names matching *beautyshot* or BS_/BS- prefix,
+    else the first match under Render Images/ by filename; plus files under a top-level
     folder named STL or whose name ends with _STL.
     """
     import gdown

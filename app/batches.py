@@ -156,7 +156,8 @@ def _discover_worker(batch_id: str) -> None:
                     ]
                     if not it.beautyshots:
                         it.note = (it.note + " " if it.note else "") + (
-                            "No file with 'beautyshot' in the name at folder root or under Render Images/."
+                            "No beautyshot-style file at folder root or under Render Images/ "
+                            "(need *beautyshot* in the name, or prefix BS_ / BS-)."
                         )
         with _lock:
             batch.status = "ready"
