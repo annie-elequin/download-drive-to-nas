@@ -41,7 +41,7 @@
   <tbody id="file-rows"></tbody>
 </table>
 <p id="poll-hint" class="poll-hint">{% if job.status.value in ('pending', 'running') %}Waiting for first status update…{% endif %}</p>
-<p id="chime-hint" class="hint" style="margin-top:-0.35rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>When the job finishes (success, failed, or cancelled), a ~1.5s chime plays if this page saw the job running. Use the slider for volume (saved in this browser). Browsers often block audio until you interact with the page — click <strong>Test sound</strong> or anywhere on the page once after it loads, then the completion chime should work too.</p>
+<p id="chime-hint" class="hint" style="margin-top:-0.35rem" {% if job.status.value not in ('pending', 'running') %}hidden{% endif %}>When the job finishes (success, failed, or cancelled), two short bright chimes play if this page saw the job running. Use the slider for volume (saved in this browser). Browsers often block audio until you interact with the page — click <strong>Test sound</strong> or anywhere on the page once after it loads, then the completion chime should work too.</p>
 <div class="row chime-controls" style="margin-top:0.2rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem 1rem">
   <label for="chime-volume" style="margin:0">Chime volume</label>
   <input type="range" id="chime-volume" min="0" max="100" value="50" aria-label="Completion chime volume">
@@ -111,7 +111,7 @@
     });
   }
 
-  /** Soft G–B major third on triangle waves (~1.5s); loudness from slider (0 = silent). */
+  /** Two bright sine taps (major thirds, second step up); loudness from slider (0 = silent). */
   function playDoneChime() {
     try {
       var vol = getChimeVolume01();
@@ -121,27 +121,31 @@
 
       function schedule() {
         var t0 = ctx.currentTime;
-        var total = 1.5;
-        var peak = 0.0001 + vol * 0.095;
+        var peak = 0.0001 + vol * 0.1;
 
-        var o1 = ctx.createOscillator();
-        var o2 = ctx.createOscillator();
-        var g = ctx.createGain();
-        o1.type = 'triangle';
-        o2.type = 'triangle';
-        o1.frequency.value = 392;
-        o2.frequency.value = 493.88;
-        o1.connect(g);
-        o2.connect(g);
-        g.connect(ctx.destination);
-        g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(peak, t0 + 0.09);
-        g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * 0.42), t0 + 0.48);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + total);
-        o1.start(t0);
-        o2.start(t0);
-        o1.stop(t0 + total + 0.02);
-        o2.stop(t0 + total + 0.02);
+        function tap(start, hz1, hz2, dur, peakScale) {
+          var o1 = ctx.createOscillator();
+          var o2 = ctx.createOscillator();
+          var g = ctx.createGain();
+          o1.type = 'sine';
+          o2.type = 'sine';
+          o1.frequency.value = hz1;
+          o2.frequency.value = hz2;
+          o1.connect(g);
+          o2.connect(g);
+          g.connect(ctx.destination);
+          var p = Math.max(0.0001, peak * peakScale);
+          g.gain.setValueAtTime(0.0001, start);
+          g.gain.exponentialRampToValueAtTime(p, start + 0.014);
+          g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+          o1.start(start);
+          o2.start(start);
+          o1.stop(start + dur + 0.02);
+          o2.stop(start + dur + 0.02);
+        }
+
+        tap(t0, 783.99, 987.77, 0.26, 1);
+        tap(t0 + 0.4, 880, 1108.73, 0.3, 0.9);
       }
 
       if (ctx.state === 'suspended') {
