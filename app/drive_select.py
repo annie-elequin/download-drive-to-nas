@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass, replace
@@ -66,6 +67,12 @@ class DiscoveryResult:
     other_root_files: list[str] | None = None  # names only, for preview
     other_root_folders: list[str] | None = None
     note: str | None = None
+
+
+def slug_for_zip_archive(parent_folder: str | None, stl_folder: str | None) -> str:
+    """Sanitized base name for ZIP (linked folder title, else STL folder name)."""
+    raw = (parent_folder or stl_folder or "pack").replace("/", "_")
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", raw)[:80].strip("._-") or "pack"
 
 
 def _parent_folder_from_gdown_paths(entries: list[Any], output_dir: str) -> str | None:

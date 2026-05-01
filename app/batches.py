@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -203,8 +202,7 @@ def approve_batch(
         if not include_stl and not beauty_list:
             continue
         stl_part = list(it.stl_files) if include_stl else []
-        raw = (it.parent_folder or it.stl_folder or "pack").replace("/", "_")
-        slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", raw)[:80].strip("._-") or "pack"
+        slug = drive_select.slug_for_zip_archive(it.parent_folder, it.stl_folder)
         label = slug[:120]
         spec = {
             "source_url": it.source_url,

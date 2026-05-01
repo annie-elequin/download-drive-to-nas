@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, batches, jobs
+from app import auth, batches, drive_select, jobs
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -130,7 +130,40 @@ def create_job_route(
     dest_for_form = destination_path
     try:
         _validate_drive_url(drive_url)
-        job = jobs.create_job(drive_url, destination_path, archive_base or "")
+        disc = drive_select.discover_public_folder(drive_url.strip())
+        if not disc.ok:
+            msg = disc.error or "Could not read this Drive folder."
+            return templates.TemplateResponse(
+                request,
+                "index.html",
+                _index_form_context(request, msg, dest_for_form),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        stl_files = list(disc.stl_files or [])
+        if not stl_files:
+            return templates.TemplateResponse(
+                request,
+                "index.html",
+                _index_form_context(
+                    request,
+                    "No STL tree found (need a top-level folder named STL or ending in _STL).",
+                    dest_for_form,
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        beauty_list = [{"id": b["id"], "name": b["name"]} for b in (disc.beautyshots or [])]
+        slug = drive_select.slug_for_zip_archive(disc.parent_folder, disc.stl_folder)
+        if archive_base.strip():
+            ab = jobs.sanitize_segment(archive_base.strip())
+        else:
+            ab = jobs.sanitize_segment(slug)
+        spec = {
+            "source_url": drive_url.strip(),
+            "label": slug[:120],
+            "beautyshots": beauty_list,
+            "stl_files": stl_files,
+        }
+        job = jobs.create_selective_job(drive_url.strip(), destination_path.strip(), ab, spec)
     except HTTPException as exc:
         msg = exc.detail if isinstance(exc.detail, str) else "Invalid request"
         return templates.TemplateResponse(

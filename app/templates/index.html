@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}New download · Drive to NAS{% endblock %}
 {% block content %}
-<h1>Download folder to ZIP</h1>
+<h1>Download pack shot + STL to ZIP</h1>
 {% if error %}
 <p class="error">{{ error }}</p>
 {% endif %}
@@ -9,12 +9,12 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label for="drive_url">Google Drive folder URL</label>
   <input type="url" id="drive_url" name="drive_url" required placeholder="https://drive.google.com/drive/folders/...">
-  <p class="hint">Folder must be shared so anyone with the link can view.</p>
+  <p class="hint">Folder must be shared so anyone with the link can view. We download only the <strong>beautyshot</strong> (<code>*beautyshot*</code> or <code>BS_</code>/<code>BS-</code> in the name, or the first match under <code>Render Images/</code>) and everything under the top-level <code>STL</code> or <code>*_STL</code> folder — same rules as batch. The job <strong>fails</strong> if any of those files cannot be downloaded.</p>
   <label for="destination_path">Destination folder (full path)</label>
   <input type="text" id="destination_path" name="destination_path" required value="{{ default_destination }}" spellcheck="false" autocomplete="off">
   <p class="hint">Must be inside <code>DATA_DIR</code>. In Docker, <code>DATA_DIR</code> is usually <code>/data</code> (your NAS folder is bind-mounted there). For local runs, set <code>DATA_DIR</code> to something like your Downloads path so files never leave that tree.</p>
   <label for="archive_base">Zip file name (without .zip)</label>
-  <input type="text" id="archive_base" name="archive_base" placeholder="Optional — default is archive_…" pattern="[a-zA-Z0-9_.-]*" title="Letters, numbers, dot, underscore, hyphen">
+  <input type="text" id="archive_base" name="archive_base" placeholder="Optional — default is the Drive folder title" pattern="[a-zA-Z0-9_.-]*" title="Letters, numbers, dot, underscore, hyphen">
   <button type="submit">Start download</button>
 </form>
 <p class="row"><a href="/batch">Batch: many folders (beautyshot + <code>STL</code> / <code>*_STL</code> only)</a></p>
